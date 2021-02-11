@@ -7,6 +7,8 @@ public class Controller2D : RayCollisionController
     float maxClimbAngle = 80;
     float MaxDescendAngle = 75;
 
+    Vector3 swingVelocity = Vector3.zero;
+
     public CollisionInfo collisions;
 
     public Vector2 standingColliderSize = new Vector2(2, 2);
@@ -22,13 +24,15 @@ public class Controller2D : RayCollisionController
     }
 
     // Moves the player with input velocity
-    public void Move(Vector3 velocity, bool standingOnPlatform = false, bool ropeAttached = false)
+    public void Move(Vector3 velocity, bool standingOnPlatform = false, bool ropeAttached = false, Vector2 anchorPos = new Vector2())
     {
         UpdateRaycastOrigins();
         collisions.Reset();
         collisions.velocityOld = velocity;
 
-        if (ropeAttached) return;
+        // Running and walking movment:
+
+        swingVelocity = Vector3.zero;
 
         if (velocity.y < 0)
         {
@@ -46,7 +50,7 @@ public class Controller2D : RayCollisionController
         }
 
         // Move player
-        transform.Translate(velocity);
+        if (!ropeAttached) transform.Translate(velocity);
 
         if (standingOnPlatform)
         {

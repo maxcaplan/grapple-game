@@ -6,6 +6,8 @@ using UnityEngine;
 [RequireComponent(typeof(Animator))]
 [RequireComponent(typeof(SpriteRenderer))]
 [RequireComponent(typeof(LineRenderer))]
+[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(DistanceJoint2D))]
 public class Player : MonoBehaviour
 {
     [Header("Jumping")]
@@ -55,14 +57,6 @@ public class Player : MonoBehaviour
     Vector3 velocity;
     Vector3 swingVelocity;
 
-    public Vector3 _velocity
-    {
-        get
-        {
-            return velocity;
-        }
-    }
-
     bool crouching = false;
     bool previousCrouchState = false;
 
@@ -79,6 +73,8 @@ public class Player : MonoBehaviour
     SpriteRenderer sprite;
     Animator animator;
     LineRenderer rope;
+    Rigidbody2D rb;
+    DistanceJoint2D joint;
 
     void Start()
     {
@@ -86,8 +82,13 @@ public class Player : MonoBehaviour
         sprite = GetComponent<SpriteRenderer>();
         animator = GetComponent<Animator>();
         rope = GetComponent<LineRenderer>();
+        rb = GetComponent<Rigidbody2D>();
+        joint = GetComponent<DistanceJoint2D>();
 
         rope.enabled = false;
+        rb.constraints = RigidbodyConstraints2D.FreezeAll;
+        joint.enabled = false;
+        joint.anchor = aimPivot.transform.position;
 
         // Calculate gravity and jump velocity
         gravity = -(2 * maxJumpHeight) / Mathf.Pow(timeToJumpApex, 2);
@@ -99,10 +100,6 @@ public class Player : MonoBehaviour
     {
         // Reset y velocity on vertical collisions
         if (controller.collisions.above || controller.collisions.below || ropeAttached) velocity.y = 0;
-
-        if (ropeAttached) velocity.x = 0;
-
-        Vector3 oldVelocity = velocity;
 
         Vector2 input = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
 
@@ -116,17 +113,17 @@ public class Player : MonoBehaviour
         // Add gravity to velocity
         velocity.y += gravity * Time.deltaTime;
 
-        // Move player
-        controller.Move(velocity * Time.deltaTime, false, ropeAttached);
-
         // Handle grappling
         UpdateAim();
-        UpdateGrapple(oldVelocity);
+        UpdateGrapple();
         UpdateGrappleMovment(input);
 
         // Update Aiming
         CalculateAimDirection();
         aimPivot.transform.eulerAngles = new Vector3(aimPivot.transform.eulerAngles.x, aimPivot.transform.eulerAngles.y, aimRotation);
+
+        // Move player
+        controller.Move(((!ropeAttached) ? velocity : (Vector3)rb.velocity) * Time.deltaTime, false, ropeAttached, aimPosition.point);
 
         // Update Animation
         UpdateAnimation(input);
@@ -232,7 +229,7 @@ public class Player : MonoBehaviour
         }
     }
 
-    void UpdateGrapple(Vector3 oldVelocity)
+    void UpdateGrapple()
     {
         if (Input.GetButton("Fire1") && canShoot)
         {
@@ -241,14 +238,35 @@ public class Player : MonoBehaviour
             rope.SetPosition(0, aimPivot.transform.position);
             rope.SetPosition(1, aimPosition.point);
 
+            // Enable and set joint
+            joint.connectedAnchor = aimPosition.point;
+            joint.distance = Vector2.Distance(aimPivot.transform.position, aimPosition.point);
+            joint.enabled = true;
+
+            // Unfreese rigidbody
+            rb.constraints = RigidbodyConstraints2D.None;
+            rb.freezeRotation = true;
+
             Vector2 ropeDir = (aimPosition.point - (Vector2)aimPivot.transform.position).normalized;
-            Vector2 perpendicularVelocity = Vector2.Perpendicular(ropeDir);
+            Vector2 perpendicularVelocity = Vector2.Perpendicular(ropeDir).normalized;
 
-            float speed = oldVelocity.magnitude;
-            perpendicularVelocity *= -Mathf.Sign(oldVelocity.x);
+            float direction = -Mathf.Sign(velocity.x);
+            if (Mathf.Abs(velocity.x) <= 0.01)
+            {
+                direction = (aimPivot.transform.position.x > aimPosition.point.x) ? 1 : -1;
+                // direction *= -Mathf.Sign(velocity.y);
+            }
 
-            Debug.DrawRay(aimPivot.transform.position, perpendicularVelocity * -Mathf.Sign(swingVelocity.x), Color.yellow);
+            Debug.DrawRay(aimPivot.transform.position, perpendicularVelocity * Mathf.Abs(velocity.magnitude) * direction, Color.yellow);
 
+            if (!ropeAttached)
+            {
+                if (Mathf.Abs(velocity.x) <= 0.01) print("no x velocity");
+
+                rb.AddForce(perpendicularVelocity * Mathf.Abs(velocity.magnitude) * direction, ForceMode2D.Impulse);
+            }
+
+            // Set rope state
             ropeAttached = true;
 
         }
@@ -258,7 +276,10 @@ public class Player : MonoBehaviour
             rope.enabled = false;
 
             // Update plauers velocity when leaving rope
-            // if (ropeAttached) velocity = swingVelocity;
+            if (ropeAttached) velocity = rb.velocity;
+
+            joint.enabled = false;
+            rb.constraints = RigidbodyConstraints2D.FreezeAll;
 
             ropeAttached = false;
         }
